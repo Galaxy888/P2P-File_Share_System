@@ -103,9 +103,6 @@ public class P2PClient extends Thread{
 
 
 
-
-
-
 	public String Client(BufferedReader input, BufferedWriter output,String SendMessage) {
 
 
