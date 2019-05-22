@@ -7,12 +7,16 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Logger;
+
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
 
 public class P2PServer extends Thread {
     private static Logger log = Logger.getLogger(P2PServer.class.getName());
@@ -27,6 +31,9 @@ public class P2PServer extends Thread {
     private ServerMain serverMain;
     private Eventmanager manager;
 
+    
+    
+
     // Identifies the user number connected
     public static int counterPeerNum = 0;
     public static ArrayList<HostPort> connectedHostPorts = new ArrayList<HostPort>();
@@ -35,13 +42,14 @@ public class P2PServer extends Thread {
 
     private Set<P2PServerThread> serverThreads = new HashSet<P2PServerThread>();
 
-    public P2PServer(int port, String host, ServerMain serverMain, Eventmanager manager) throws IOException{
+    public P2PServer(int port, String host, ServerMain serverMain, Eventmanager manager) throws IOException, NoSuchAlgorithmException{
         this.port = port;
         this.host = host;
         serverSocket = new ServerSocket(port);
         hostPort = new HostPort(host,port);
         this.serverMain = serverMain;
         this.manager = manager;
+
 
     }
 

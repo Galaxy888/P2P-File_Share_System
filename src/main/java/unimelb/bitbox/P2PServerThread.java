@@ -13,10 +13,14 @@ import java.nio.ByteBuffer;
 import java.security.NoSuchAlgorithmException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Logger;
+
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
 
 import static unimelb.bitbox.Peer.syncInterval;
 
@@ -34,6 +38,14 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 	private boolean isConnected;
 
 	private BlockingQueue<String> events;
+	
+	
+	private String[] authorized_keys = Configuration.getConfigurationValue("authorized_keys").split(",");
+
+	private SecretKey sk;
+	private SecretKey secretKey;
+	
+	
 	Timer t;
 
 
@@ -134,6 +146,7 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 			String command = inputMessageDoc.getString("command");
 //			System.out.println("command: " + command);
 			switch(command) {
+			
 				case "HANDSHAKE_REQUEST":
 					Document hostportinput = (Document) inputMessageDoc.get("hostPort");
 					hostport = new HostPort(hostportinput);
@@ -477,9 +490,46 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
                 case "INVALID_PROTOCOL":
                     log.warning("invalid protocol");
                     break;
+                
+                case "AUTH_REQUEST":
+                	System.out.println("recieved auth_request");
+                	String identity = inputMessageDoc.getString("identity");
+                	System.out.println("identity: "+identity);
+                	for (String keys: authorized_keys) {
+                		System.out.println("key: " + keys);
+                		if (keys.split(" ")[2].equals(identity)) {
+                			String clientPublicKey = keys.split(" ")[1];
+                			KeyGenerator kg = KeyGenerator.getInstance("AES");
+                			kg.init(128);
+                		    sk = kg.generateKey();
+                		    secretKey = sk;
+                		    System.out.println("secret key: "+secretKey);
+                		    byte[] input = sk.getEncoded();
+                		    String secretKeyEncoded = Base64.getEncoder().encodeToString(input);
+                		    System.out.println("secret key encode with pubkey: "+ secretKeyEncoded);
+                		    
+                		}
+                	}
+                	break;
+                	
 
 				default:
-
+//					System.out.println("recieved auth_request");
+//                	String identity = inputMessageDoc.getString("identity");
+//                	for (String keys: authorized_keys) {
+//                		if (keys.split(" ")[2].equals(identity)) {
+//                			String clientPublicKey = keys.split(" ")[1];
+//                			KeyGenerator kg = KeyGenerator.getInstance("AES");
+//                			kg.init(128);
+//                		    sk = kg.generateKey();
+//                		    secretKey = sk;
+//                		    System.out.println("secret key: "+secretKey);
+//                		    byte[] input = sk.getEncoded();
+//                		    String secretKeyEncoded = Base64.getEncoder().encodeToString(input);
+//                		    System.out.println("secret key encode with pubkey: "+ secretKeyEncoded);
+//                		    
+//                		}
+//                	}
 					log.info("invalid command");
 //            		this.CloseConnection();
 
