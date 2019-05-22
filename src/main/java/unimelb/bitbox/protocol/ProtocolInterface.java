@@ -18,6 +18,8 @@ public interface ProtocolInterface {
     public static String FILE_BYTES_REQUEST = "FILE_BYTES_REQUEST";
     public static String FILE_BYTES_RESPONSE = "FILE_BYTES_RESPONSE";
 
+    public static String AUTH_REQUEST = "AUTH_REQUEST";
+
     public static String FIELD_COMMAND = "command";
     public static String FIELD_MESSAGE = "message";
     public static String FIELD_PEERS = "peers";

@@ -212,4 +212,18 @@ public class Protocol implements ProtocolInterface{
 
 
 
+    public String generateAuthRequestMessage(String identity) {
+        //get fields required for AUTH_REQUEST protocol
+        String command = AUTH_REQUEST;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("identity", identity);
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+
+
 }
