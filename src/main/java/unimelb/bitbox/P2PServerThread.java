@@ -10,7 +10,12 @@ import unimelb.bitbox.util.HostPort;
 import java.io.*;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -19,8 +24,11 @@ import java.util.TimerTask;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Logger;
 
+import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+
+import org.kohsuke.args4j.Config;
 
 import static unimelb.bitbox.Peer.syncInterval;
 
@@ -42,8 +50,7 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 	
 	private String[] authorized_keys = Configuration.getConfigurationValue("authorized_keys").split(",");
 
-	private SecretKey sk;
-	private SecretKey secretKey;
+
 	
 	
 	Timer t;
@@ -133,7 +140,7 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 
 
 
-	private void process(String inputMessage) throws NoSuchAlgorithmException, IOException {
+	private void process(String inputMessage) throws Exception {
 		String response = "";
 		Protocol protocol = new Protocol();
 		//HostPort hostport;
@@ -499,13 +506,30 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
                 		System.out.println("key: " + keys);
                 		if (keys.split(" ")[2].equals(identity)) {
                 			String clientPublicKey = keys.split(" ")[1];
-                			KeyGenerator kg = KeyGenerator.getInstance("AES");
-                			kg.init(128);
-                		    sk = kg.generateKey();
-                		    secretKey = sk;
-                		    System.out.println("secret key: "+secretKey);
-                		    byte[] input = sk.getEncoded();
-                		    String secretKeyEncoded = Base64.getEncoder().encodeToString(input);
+
+              
+                	        PublicKey pubkey = getPublicKey(clientPublicKey);
+                	        System.out.println("public key generate ");
+                	        System.out.println(pubkey);
+           
+                			
+              		
+                			//create key AES
+                			KeyGenerator gen = KeyGenerator.getInstance("AES");
+                			gen.init(128);
+                		    SecretKey AES = gen.generateKey();
+                		    
+                		    // get the raw key bytes
+                		    System.out.println("secret key: "+AES);
+                		    byte[] symmetriskNyckel = AES.getEncoded();
+                		    
+                		    //encrypt AES key with RSA
+                		    Cipher pipher = Cipher.getInstance("RSA");
+                		    pipher.init(Cipher.ENCRYPT_MODE, pubkey);
+                		    byte[] krypteradAESNyckel= pipher.doFinal(symmetriskNyckel);
+                		    System.out.println("get raw key byte: "+krypteradAESNyckel);
+                		    
+                		    String secretKeyEncoded = Base64.getEncoder().encodeToString(krypteradAESNyckel);
                 		    System.out.println("secret key encode with pubkey: "+ secretKeyEncoded);
                 		    
                 		}
@@ -513,25 +537,8 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
                 	break;
                 	
 
-				default:
-//					System.out.println("recieved auth_request");
-//                	String identity = inputMessageDoc.getString("identity");
-//                	for (String keys: authorized_keys) {
-//                		if (keys.split(" ")[2].equals(identity)) {
-//                			String clientPublicKey = keys.split(" ")[1];
-//                			KeyGenerator kg = KeyGenerator.getInstance("AES");
-//                			kg.init(128);
-//                		    sk = kg.generateKey();
-//                		    secretKey = sk;
-//                		    System.out.println("secret key: "+secretKey);
-//                		    byte[] input = sk.getEncoded();
-//                		    String secretKeyEncoded = Base64.getEncoder().encodeToString(input);
-//                		    System.out.println("secret key encode with pubkey: "+ secretKeyEncoded);
-//                		    
-//                		}
-//                	}
+				default:				
 					log.info("invalid command");
-//            		this.CloseConnection();
 
 			}
 
@@ -544,37 +551,24 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 		log.info("Sending to " + hostport + " "+response);
 //    	return response;
 	}
+	
+	
+	
+	
+	
+	public static PublicKey getPublicKey(String key) throws InvalidKeySpecException, NoSuchAlgorithmException {
+		KeyFactory kf = KeyFactory.getInstance("RSA");
+
+        X509EncodedKeySpec keySpecX509 = new X509EncodedKeySpec(Base64.getDecoder().decode(key));
+
+        PublicKey pubKey = kf.generatePublic(keySpecX509);
+        
+		return pubKey;
 
 
-//	private void CloseConnection() {
-//		P2PServer.counterPeerNum--;
-////		P2PServer.connectedHostPorts.remove()
-//		System.out.println("Closing connection, Now have: "+ P2PServer.counterPeerNum +" connections");
-//
-//		try {
-//			this.input.close();
-//		} catch (Exception e) {
-//		}
-//
-//		try {
-//			this.output.close();
-//		} catch (Exception e){
-//
-//		}
-//
-//		try {
-//			this.socket.close();
-//		} catch (Exception e) {
-//
-//		}
-//
-//
-//	}
+	}
 
-
-
-
-
+		
 
 
 }
