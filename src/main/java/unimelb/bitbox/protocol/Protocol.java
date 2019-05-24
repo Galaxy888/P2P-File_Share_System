@@ -224,6 +224,150 @@ public class Protocol implements ProtocolInterface{
     }
 
 
+    public String generateAuthRespondSuccessMessage(String AES128){
+        //get fields required for AUTH_REQUEST protocol
+        String command = AUTH_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("AES128", AES128);
+        messageJson.append("status", true);
+        messageJson.append("message","public key found");
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+
+    public String generateAuthRespondFailMessage(){
+        //get fields required for AUTH_REQUEST protocol
+        String command = AUTH_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("status", false);
+        messageJson.append("message","public key not found");
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+//LISTPEERSREQUEST
+
+    public String generateListPeersRequestMessage(){
+        //get fields required for AUTH_REQUEST protocol
+        String command = LIST_PEERS_REQUEST;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+    public String generateListPeersResponseMessage(ArrayList<HostPort> hostPorts){
+        //get fields required for AUTH_REQUEST protocol
+        String command = LIST_PEERS_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        ArrayList<Document> peersDocs = new ArrayList<Document>();
+        for (HostPort peer: hostPorts){
+            peersDocs.add(peer.toDoc());
+        }
+        messageJson.append("peers", peersDocs);
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+//CONNECTPEERREQUEST
+
+    public String generateConnectPeerRequestMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = CONNECT_PEER_REQUEST;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+    public String generateConnectPeerResponseSucessMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = CONNECT_PEER_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        messageJson.append("status", true);
+        messageJson.append("message", "connected to peer");
+        // return message string
+        return messageJson.toJson();
+    }
+
+
+
+    public String generateConnectPeerResponseFailMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = CONNECT_PEER_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        messageJson.append("status", false);
+        messageJson.append("message", "connection failed");
+        // return message string
+        return messageJson.toJson();
+    }
+
+//DISCONNECTPEERREQUEST
+
+    public String generateDisconnectPeerRequestMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = DISCONNECT_PEER_REQUEST;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        // return message string
+        return messageJson.toJson();
+    }
+
+    public String generateDisconnectPeerResponseSucessMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = DISCONNECT_PEER_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        messageJson.append("status", true);
+        messageJson.append("message", "disconnected from peer");
+        // return message string
+        return messageJson.toJson();
+    }
+
+    public String generateDisconnectPeerResponseFailMessage(HostPort hostPort){
+        //get fields required for AUTH_REQUEST protocol
+        String command = DISCONNECT_PEER_RESPONSE;
+        // string message in json form
+        Document messageJson = new Document();
+        messageJson.append("command", command);
+        messageJson.append("host", hostPort.host);
+        messageJson.append("port", hostPort.port);
+        messageJson.append("status", false);
+        messageJson.append("message", "connection not active");
+        // return message string
+        return messageJson.toJson();
+    }
+
 
 
 }

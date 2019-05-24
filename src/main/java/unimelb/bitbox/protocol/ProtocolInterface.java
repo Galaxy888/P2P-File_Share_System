@@ -19,6 +19,13 @@ public interface ProtocolInterface {
     public static String FILE_BYTES_RESPONSE = "FILE_BYTES_RESPONSE";
 
     public static String AUTH_REQUEST = "AUTH_REQUEST";
+    public static String AUTH_RESPONSE = "AUTH_RESPONSE";
+    public static String LIST_PEERS_REQUEST = "LIST_PEERS_REQUEST";
+    public static String LIST_PEERS_RESPONSE = "LIST_PEERS_RESPONSE";
+    public static String CONNECT_PEER_REQUEST = "CONNECT_PEER_REQUEST";
+    public static String CONNECT_PEER_RESPONSE = "CONNECT_PEER_RESPONSE";
+    public static String DISCONNECT_PEER_REQUEST = "DISCONNECT_PEER_REQUEST";
+    public static String DISCONNECT_PEER_RESPONSE = "DISCONNECT_PEER_RESPONSE";
 
     public static String FIELD_COMMAND = "command";
     public static String FIELD_MESSAGE = "message";
