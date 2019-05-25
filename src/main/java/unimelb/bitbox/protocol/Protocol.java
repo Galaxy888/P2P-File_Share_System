@@ -369,5 +369,12 @@ public class Protocol implements ProtocolInterface{
     }
 
 
+    public String generatePayload(String payload){
+        Document messageJson = new Document();
+        messageJson.append("payload", payload);
+        // return message string
+        return messageJson.toJson();
+    }
+
 
 }

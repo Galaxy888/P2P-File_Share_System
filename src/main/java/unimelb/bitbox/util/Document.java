@@ -107,7 +107,7 @@ public class Document {
 	public String getString(String key){
 		return (String) obj.get(key);
 	}
-	
+
 	private ArrayList<Object> getList(JSONArray o){
 		ArrayList<Object> list = new ArrayList<Object>();
 		for(Object l : (JSONArray)o){

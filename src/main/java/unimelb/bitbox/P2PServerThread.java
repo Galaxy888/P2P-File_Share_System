@@ -10,13 +10,13 @@ import unimelb.bitbox.util.HostPort;
 import java.io.*;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.security.InvalidKeyException;
 import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Timer;
@@ -24,9 +24,13 @@ import java.util.TimerTask;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Logger;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.kohsuke.args4j.Config;
 
@@ -46,14 +50,15 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 	private boolean isConnected;
 
 	private BlockingQueue<String> events;
-	
-	
+
+
 	private String[] authorized_keys = Configuration.getConfigurationValue("authorized_keys").split(",");
 
 
-	
-	
+
+
 	Timer t;
+	private String secretKey;
 
 
 	public P2PServerThread(Socket socket, P2PServer server, ServerMain serverMain, BlockingQueue<String> events1) {
@@ -150,396 +155,429 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 		try {
 			long block_size = Long.parseLong(Configuration.getConfigurationValue("blockSize").trim());
 			Document inputMessageDoc = Document.parse(inputMessage);
-			String command = inputMessageDoc.getString("command");
+			String payload = inputMessageDoc.getString("payload");
+			System.out.println (payload);
+
+			if (payload != null)
+			{
+				System.out.println(secretKey);
+				String message1 = decrypt(payload,secretKey);
+				System.out.println(message1);
+				Document inputmessage1 = Document.parse(message1);
+				String command = inputmessage1.getString("command");
+				switch(command) {
+					case "LIST_PEERS_REQUEST":
+						String Listpeerresponse = protocol.generateListPeersResponseMessage(P2PServer.connectedHostPorts);
+						String sendmessage = encrypt(Listpeerresponse, secretKey);
+						Document messageJson = new Document();
+						messageJson.append("payload", sendmessage);
+						response = messageJson.toJson();
+						events.offer(response);
+				}
+			}
+			else {
+				String command = inputMessageDoc.getString("command");
+
 //			System.out.println("command: " + command);
-			switch(command) {
-			
-				case "HANDSHAKE_REQUEST":
-					Document hostportinput = (Document) inputMessageDoc.get("hostPort");
-					hostport = new HostPort(hostportinput);
-					//host = hostport.host;
-					//port = hostport.port;
-					if (P2PServer.counterPeerNum < Integer.parseInt(Configuration.getConfigurationValue("maximumIncommingConnections"))) {
-						P2PServer.counterPeerNum++;
-						P2PServer.connectedHostPorts.add(hostport);
-						log.info("receive HANDSHAKE_REQUEST from " + hostport);
+				switch(command) {
 
-						response= protocol.generateHandshakeResponseMessage(server.getHostPort());
-						this.isConnected= true;
+					case "HANDSHAKE_REQUEST":
+						Document hostportinput = (Document) inputMessageDoc.get("hostPort");
+						hostport = new HostPort(hostportinput);
+						//host = hostport.host;
+						//port = hostport.port;
+						if (P2PServer.counterPeerNum < Integer.parseInt(Configuration.getConfigurationValue("maximumIncommingConnections"))) {
+							P2PServer.counterPeerNum++;
+							P2PServer.connectedHostPorts.add(hostport);
+							log.info("receive HANDSHAKE_REQUEST from " + hostport);
 
-						events.offer(response);
-						ArrayList<FileSystemManager.FileSystemEvent> fileSystemEvents = serverMain.fileSystemManager.generateSyncEvents();
-						ArrayList<String> fileSystemEventsMessage = protocol.genergateFileSystemEventsMessage(fileSystemEvents);
-						for (String event: fileSystemEventsMessage){
-							events.offer(event);
+							response= protocol.generateHandshakeResponseMessage(server.getHostPort());
+							this.isConnected= true;
+
+							events.offer(response);
+							ArrayList<FileSystemManager.FileSystemEvent> fileSystemEvents = serverMain.fileSystemManager.generateSyncEvents();
+							ArrayList<String> fileSystemEventsMessage = protocol.genergateFileSystemEventsMessage(fileSystemEvents);
+							for (String event: fileSystemEventsMessage){
+								events.offer(event);
+							}
+
+						} else {
+
+							response= protocol.generateConncetionRefusedMessage(P2PServer.connectedHostPorts);
+							events.offer(response);
 						}
+						break;
 
-					} else {
+					case "FILE_CREATE_REQUEST":
+						Document fileDescriptorFCReq = (Document) inputMessageDoc.get("fileDescriptor");
+						md5 = fileDescriptorFCReq.getString("md5");
+						time = fileDescriptorFCReq.getLong("lastModified");
+						fileSize = fileDescriptorFCReq.getLong("fileSize");
 
-						response= protocol.generateConncetionRefusedMessage(P2PServer.connectedHostPorts);
-						events.offer(response);
-					}
-					break;
+						pathName = inputMessageDoc.getString("pathName");
+						if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
+							if (!this.serverMain.fileSystemManager.fileNameExists(pathName)) {
+								try {
+									if (!this.serverMain.fileSystemManager.createFileLoader(pathName, md5, fileSize, time)) {
+										response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "unknown problem", false);
+										events.offer(response);
+										break;
+									}
 
-				case "FILE_CREATE_REQUEST":
-					Document fileDescriptorFCReq = (Document) inputMessageDoc.get("fileDescriptor");
-					md5 = fileDescriptorFCReq.getString("md5");
-					time = fileDescriptorFCReq.getLong("lastModified");
-					fileSize = fileDescriptorFCReq.getLong("fileSize");
+									if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
+										long readLength;
+										if (fileSize==0) {
+											response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
+											events.offer(response);
+											this.serverMain.fileSystemManager.checkWriteComplete(pathName);
+											break;
 
-					pathName = inputMessageDoc.getString("pathName");
-					if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
-						if (!this.serverMain.fileSystemManager.fileNameExists(pathName)) {
-							try {
-								if (!this.serverMain.fileSystemManager.createFileLoader(pathName, md5, fileSize, time)) {
-									response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "unknown problem", false);
-									events.offer(response);
-									break;
-								}
+										} else if (fileSize <= block_size) {
+											readLength = fileSize;
+										} else {
+											readLength = block_size;
+										}
+//									System.out.println("file_byte request sent");
+										response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
+										events.offer(response);
 
-								if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
-									long readLength;
-									if (fileSize==0) {
+										response= protocol.genergateFileBytesRequest(fileDescriptorFCReq, pathName, 0, readLength);
+										events.offer(response);
+									}else {
+										this.serverMain.fileSystemManager.cancelFileLoader(pathName);
+//									System.out.println("shortcut");
+
 										response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
 										events.offer(response);
-										this.serverMain.fileSystemManager.checkWriteComplete(pathName);
+
+									}
+
+								} catch (Exception e) {
+									response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "there was a problem creating the file", false);
+									events.offer(response);
+									e.printStackTrace();
+								}
+							} else if (!this.serverMain.fileSystemManager.fileNameExists(pathName, md5)) {
+								try {
+									if (!serverMain.fileSystemManager.modifyFileLoader(pathName, md5, time)){
+										response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "Unknown error", false);
 										break;
-
-									} else if (fileSize <= block_size) {
-										readLength = fileSize;
-									} else {
-										readLength = block_size;
 									}
-//									System.out.println("file_byte request sent");
-									response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
-									events.offer(response);
+									if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
+										long readLength;
+										if (fileSize <= block_size){
+											readLength = fileSize;
 
-									response= protocol.genergateFileBytesRequest(fileDescriptorFCReq, pathName, 0, readLength);
-									events.offer(response);
-								}else {
-									this.serverMain.fileSystemManager.cancelFileLoader(pathName);
-//									System.out.println("shortcut");
+										} else {
+											readLength = block_size;
+										}
+										response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "Success", true);
+										events.offer(response);
+										response = protocol.genergateFileBytesRequest(fileDescriptorFCReq, pathName, 0, readLength);
+										events.offer(response);
+									} else {
+										this.serverMain.fileSystemManager.cancelFileLoader(pathName);
+										response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
+									}
 
-									response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
-									events.offer(response);
-
+								} catch (Exception e) {
+									log.warning("file create failed");
 								}
 
-							} catch (Exception e) {
-								response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "there was a problem creating the file", false);
+							} else {
+
+								response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
 								events.offer(response);
-								e.printStackTrace();
+
 							}
-						} else if (!this.serverMain.fileSystemManager.fileNameExists(pathName, md5)) {
-							try {
-								if (!serverMain.fileSystemManager.modifyFileLoader(pathName, md5, time)){
-									response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "Unknown error", false);
-									break;
-								}
-								if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
-									long readLength;
-									if (fileSize <= block_size){
-										readLength = fileSize;
-
-									} else {
-										readLength = block_size;
-									}
-									response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "Success", true);
-									events.offer(response);
-									response = protocol.genergateFileBytesRequest(fileDescriptorFCReq, pathName, 0, readLength);
-									events.offer(response);
-								} else {
-									this.serverMain.fileSystemManager.cancelFileLoader(pathName);
-									response = protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
-								}
-
-							} catch (Exception e) {
-								log.warning("file create failed");
-							}
-
 						} else {
-
-							response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "file loader ready", true);
-							events.offer(response);
-
-						}
-					} else {
 //						System.out.println("path not safe");
-						response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "unsafe pathname", false);
-						events.offer(response);
-					}
-					break;
-
-
-				case "FILE_MODIFY_REQUEST":
-					Document fileDescriptorFMReq = (Document) inputMessageDoc.get("fileDescriptor");
-					md5 = fileDescriptorFMReq.getString("md5");
-					time = fileDescriptorFMReq.getLong("lastModified");
-					fileSize = fileDescriptorFMReq.getLong("fileSize");
-					pathName = inputMessageDoc.getString("pathName");
-					if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
-						if (!this.serverMain.fileSystemManager.fileNameExists(pathName)) {
-							response = protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "pathname does not exist", false);
+							response= protocol.generateFileCreateResponseMessage(fileDescriptorFCReq, pathName, "unsafe pathname", false);
 							events.offer(response);
-						} else if (!this.serverMain.fileSystemManager.fileNameExists(pathName, md5)) {
-							try {
-								if (!this.serverMain.fileSystemManager.modifyFileLoader(pathName, md5, time)) {
+						}
+						break;
+
+
+					case "FILE_MODIFY_REQUEST":
+						Document fileDescriptorFMReq = (Document) inputMessageDoc.get("fileDescriptor");
+						md5 = fileDescriptorFMReq.getString("md5");
+						time = fileDescriptorFMReq.getLong("lastModified");
+						fileSize = fileDescriptorFMReq.getLong("fileSize");
+						pathName = inputMessageDoc.getString("pathName");
+						if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
+							if (!this.serverMain.fileSystemManager.fileNameExists(pathName)) {
+								response = protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "pathname does not exist", false);
+								events.offer(response);
+							} else if (!this.serverMain.fileSystemManager.fileNameExists(pathName, md5)) {
+								try {
+									if (!this.serverMain.fileSystemManager.modifyFileLoader(pathName, md5, time)) {
+										break;
+									}
+
+									if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
+										long readLength;
+										if (fileSize <= block_size) {
+											readLength = fileSize;
+										} else {
+											readLength = block_size;
+										}
+//									System.out.println("file_byte request sent");
+										response = protocol.genergateFileBytesRequest(fileDescriptorFMReq, pathName, 0, readLength);
+										events.offer(response);
+
+									} else {
+										this.serverMain.fileSystemManager.cancelFileLoader(pathName);
+//									System.out.println("shortcut");
+										response = protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "file loader ready", true);
+										events.offer(response);
+									}
+
+
+								} catch (Exception e) {
+									e.printStackTrace();
+//                                this.CloseConnection();
 									break;
 								}
+							} else {
 
-								if (!this.serverMain.fileSystemManager.checkShortcut(pathName)) {
-									long readLength;
-									if (fileSize <= block_size) {
-										readLength = fileSize;
-									} else {
-										readLength = block_size;
-									}
-//									System.out.println("file_byte request sent");
-									response = protocol.genergateFileBytesRequest(fileDescriptorFMReq, pathName, 0, readLength);
-									events.offer(response);
-
-								} else {
-									this.serverMain.fileSystemManager.cancelFileLoader(pathName);
-//									System.out.println("shortcut");
-									response = protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "file loader ready", true);
-									events.offer(response);
-								}
-
-
-							} catch (Exception e) {
-								e.printStackTrace();
-//                                this.CloseConnection();
-								break;
+								response= protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "pathname does not exist", true);
+								events.offer(response);
 							}
 						} else {
-
-							response= protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "pathname does not exist", true);
-							events.offer(response);
-						}
-					} else {
 //						System.out.println("not safe path");
-						response= protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "unsafe pathname given", false);
-						events.offer(response);
-
-					}
-					break;
-
-				case "FILE_BYTES_RESPONSE":
-					Document fileDescriptorFBRes = (Document) inputMessageDoc.get("fileDescriptor");
-					md5 = fileDescriptorFBRes.getString("md5");
-					time = fileDescriptorFBRes.getLong("lastModified");
-					fileSize = fileDescriptorFBRes.getLong("fileSize");
-					pathName = inputMessageDoc.getString("pathName");
-					content = inputMessageDoc.getString("content");
-					position = inputMessageDoc.getLong("position");
-					ByteBuffer src = ByteBuffer.wrap(java.util.Base64.getDecoder().decode(content));
-
-					this.serverMain.fileSystemManager.writeFile(pathName, src, position);
-
-
-					if (!this.serverMain.fileSystemManager.checkWriteComplete(pathName)) {
-						long readLength;
-						if (position + block_size  <= fileSize) {
-							readLength = block_size;
-						} else {
-							readLength = fileSize - position  ;
+							response= protocol.generateFileModifyResponseMessage(fileDescriptorFMReq, pathName, "unsafe pathname given", false);
+							events.offer(response);
 
 						}
-						response= protocol.genergateFileBytesRequest(fileDescriptorFBRes, pathName, position+block_size, readLength);
-						events.offer(response);
-					} else {
+						break;
 
-						log.info("file transfer complete");
+					case "FILE_BYTES_RESPONSE":
+						Document fileDescriptorFBRes = (Document) inputMessageDoc.get("fileDescriptor");
+						md5 = fileDescriptorFBRes.getString("md5");
+						time = fileDescriptorFBRes.getLong("lastModified");
+						fileSize = fileDescriptorFBRes.getLong("fileSize");
+						pathName = inputMessageDoc.getString("pathName");
+						content = inputMessageDoc.getString("content");
+						position = inputMessageDoc.getLong("position");
+						ByteBuffer src = ByteBuffer.wrap(java.util.Base64.getDecoder().decode(content));
 
-					}
+						this.serverMain.fileSystemManager.writeFile(pathName, src, position);
 
 
-					break;
+						if (!this.serverMain.fileSystemManager.checkWriteComplete(pathName)) {
+							long readLength;
+							if (position + block_size  <= fileSize) {
+								readLength = block_size;
+							} else {
+								readLength = fileSize - position  ;
+
+							}
+							response= protocol.genergateFileBytesRequest(fileDescriptorFBRes, pathName, position+block_size, readLength);
+							events.offer(response);
+						} else {
+
+							log.info("file transfer complete");
+
+						}
 
 
-				case "FILE_BYTES_REQUEST":
-					Document fileDescriptorFBReq = (Document) inputMessageDoc.get("fileDescriptor");
-					md5 = fileDescriptorFBReq.getString("md5");
-					time = fileDescriptorFBReq.getLong("lastModified");
-					fileSize = fileDescriptorFBReq.getLong("fileSize");
-					pathName = inputMessageDoc.getString("pathName");
-					long length = inputMessageDoc.getLong("length");
-					position = inputMessageDoc.getLong("position");
+						break;
 
-					if (position + length <= fileSize) {
-						byte[] byteContent = serverMain.fileSystemManager.readFile(md5, position, length).array();
-						content = java.util.Base64.getEncoder().encodeToString(byteContent);
-						response = protocol.generateFileBytesResponseMessage(fileDescriptorFBReq, pathName, position, length, content,"successful read", true );
-						events.offer(response);
+
+					case "FILE_BYTES_REQUEST":
+						Document fileDescriptorFBReq = (Document) inputMessageDoc.get("fileDescriptor");
+						md5 = fileDescriptorFBReq.getString("md5");
+						time = fileDescriptorFBReq.getLong("lastModified");
+						fileSize = fileDescriptorFBReq.getLong("fileSize");
+						pathName = inputMessageDoc.getString("pathName");
+						long length = inputMessageDoc.getLong("length");
+						position = inputMessageDoc.getLong("position");
+
+						if (position + length <= fileSize) {
+							byte[] byteContent = serverMain.fileSystemManager.readFile(md5, position, length).array();
+							content = java.util.Base64.getEncoder().encodeToString(byteContent);
+							response = protocol.generateFileBytesResponseMessage(fileDescriptorFBReq, pathName, position, length, content,"successful read", true );
+							events.offer(response);
 //						System.out.println("size checked, byte response sent" );
-					} else {
-						log.warning("The read length is bigger than file size");
+						} else {
+							log.warning("The read length is bigger than file size");
 //            		    this.CloseConnection();
-					}
+						}
 
 
-					break;
+						break;
 
 
 
 
 
-				case "FILE_DELETE_REQUEST":
-					Document fileDescriptorFDReq = (Document) inputMessageDoc.get("fileDescriptor");
-					md5 = fileDescriptorFDReq.getString("md5");
-					time = fileDescriptorFDReq.getLong("lastModified");
-					fileSize = fileDescriptorFDReq.getLong("fileSize");
-					pathName = inputMessageDoc.getString("pathName");
-					if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
-						if (this.serverMain.fileSystemManager.fileNameExists(pathName,md5)) {
-							try {
-								if(this.serverMain.fileSystemManager.deleteFile(pathName, time, md5)) {
-									response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "file deleted", true);
+					case "FILE_DELETE_REQUEST":
+						Document fileDescriptorFDReq = (Document) inputMessageDoc.get("fileDescriptor");
+						md5 = fileDescriptorFDReq.getString("md5");
+						time = fileDescriptorFDReq.getLong("lastModified");
+						fileSize = fileDescriptorFDReq.getLong("fileSize");
+						pathName = inputMessageDoc.getString("pathName");
+						if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
+							if (this.serverMain.fileSystemManager.fileNameExists(pathName,md5)) {
+								try {
+									if(this.serverMain.fileSystemManager.deleteFile(pathName, time, md5)) {
+										response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "file deleted", true);
+										events.offer(response);
+									}
+
+								} catch (Exception e) {
+									response = protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "couldn't delete file", false);
+									events.offer(response);
+									e.printStackTrace();
+								}
+							} else {
+//							System.out.println("file does not exist");
+								response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "file does not exist", false);
+								events.offer(response);
+							}
+						} else {
+//						System.out.println("not safe path");
+							response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "unsafe pathname given", false);
+							events.offer(response);
+						}
+						break;
+
+
+					case "DIRECTORY_DELETE_REQUEST":
+
+						pathName = inputMessageDoc.getString("pathName");
+						if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
+							if (this.serverMain.fileSystemManager.dirNameExists(pathName)) {
+								if(this.serverMain.fileSystemManager.deleteDirectory(pathName)) {
+//								System.out.println("directory deleted");
+									response= protocol.generateDirectoryDeleteResponseMessage(pathName, "directory deleted", true);
+									events.offer(response);
+								} else {
+//								System.out.println("directory delete fail");
+									response= protocol.generateDirectoryDeleteResponseMessage(pathName, "there was a problem deleting the directory", false);
 									events.offer(response);
 								}
 
-							} catch (Exception e) {
-								response = protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "couldn't delete file", false);
+							}else {
+								response= protocol.generateDirectoryDeleteResponseMessage(pathName, "pathname does not exist", false);
 								events.offer(response);
-								e.printStackTrace();
 							}
 						} else {
-//							System.out.println("file does not exist");
-							response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "file does not exist", false);
+							response= protocol.generateDirectoryDeleteResponseMessage(pathName, "unsafe pathname given", false);
 							events.offer(response);
+
 						}
-					} else {
-//						System.out.println("not safe path");
-						response= protocol.generateFileDeleteResponseMessage(fileDescriptorFDReq, pathName, "unsafe pathname given", false);
-						events.offer(response);
-					}
-					break;
 
 
-				case "DIRECTORY_DELETE_REQUEST":
+						break;
 
-					pathName = inputMessageDoc.getString("pathName");
-					if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
-						if (this.serverMain.fileSystemManager.dirNameExists(pathName)) {
-							if(this.serverMain.fileSystemManager.deleteDirectory(pathName)) {
-//								System.out.println("directory deleted");
-								response= protocol.generateDirectoryDeleteResponseMessage(pathName, "directory deleted", true);
-								events.offer(response);
-							} else {
+					case "DIRECTORY_CREATE_REQUEST":
+						pathName = inputMessageDoc.getString("pathName");
+						if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
+							if (!this.serverMain.fileSystemManager.dirNameExists(pathName)) {
+								if(this.serverMain.fileSystemManager.makeDirectory(pathName)) {
+
+									response= protocol.generateDirectoryCreateResponseMessage(pathName, "directory created", true);
+									events.offer(response);
+								} else {
 //								System.out.println("directory delete fail");
-								response= protocol.generateDirectoryDeleteResponseMessage(pathName, "there was a problem deleting the directory", false);
+									response= protocol.generateDirectoryCreateResponseMessage(pathName, "there was a problem creating the directory", false);
+									events.offer(response);
+								}
+
+							}else {
+								response= protocol.generateDirectoryCreateResponseMessage(pathName, "pathname already exists", false);
 								events.offer(response);
 							}
-
-						}else {
-							response= protocol.generateDirectoryDeleteResponseMessage(pathName, "pathname does not exist", false);
+						} else {
+							response= protocol.generateDirectoryCreateResponseMessage(pathName, "unsafe pathname given", false);
 							events.offer(response);
+
 						}
-					} else {
-						response= protocol.generateDirectoryDeleteResponseMessage(pathName, "unsafe pathname given", false);
-						events.offer(response);
 
-					}
+						break;
+
+					case "DIRECTORY_CREATE_RESPONSE":
+						log.info("received from " + hostport +" "+ command);
+						break;
+
+					case "DIRECTORY_DELETE_RESPONSE":
+						log.info("received from " + hostport +" "+ command);
+						break;
+
+					case "FILE_CREATE_RESPONSE":
+						log.info("received from " + hostport +" "+ command);
+						break;
+
+					case "FILE_MODIFY_RESPONSE":
+						log.info("received from " + hostport +" "+ command);
+						break;
+
+					case "FILE_DELETE_RESPONSE":
+						log.info("received from " + hostport +" "+ command);
+						break;
+
+					case "CONNECTION_REFUSED":
+						log.warning("connection refused");
+						break;
+
+					case "INVALID_PROTOCOL":
+						log.warning("invalid protocol");
+						break;
+
+					case "AUTH_REQUEST":
+						System.out.println("recieved auth_request");
+						String identity = inputMessageDoc.getString("identity");
+						System.out.println("identity: "+identity);
+						for (String keys: authorized_keys) {
+							System.out.println("key: " + keys);
+							if (keys.split(" ")[2].equals(identity)) {
+								String clientPublicKey = keys.split(" ")[1];
 
 
-					break;
+								// PublicKey pubkey = getPublicKey(clientPublicKey);
+								// System.out.println("public key generate ");
+								// System.out.println(pubkey);
 
-				case "DIRECTORY_CREATE_REQUEST":
-					pathName = inputMessageDoc.getString("pathName");
-					if (this.serverMain.fileSystemManager.isSafePathName(pathName)) {
-						if (!this.serverMain.fileSystemManager.dirNameExists(pathName)) {
-							if(this.serverMain.fileSystemManager.makeDirectory(pathName)) {
 
-								response= protocol.generateDirectoryCreateResponseMessage(pathName, "directory created", true);
-								events.offer(response);
-							} else {
-//								System.out.println("directory delete fail");
-								response= protocol.generateDirectoryCreateResponseMessage(pathName, "there was a problem creating the directory", false);
-								events.offer(response);
-							}
 
-						}else {
-							response= protocol.generateDirectoryCreateResponseMessage(pathName, "pathname already exists", false);
-							events.offer(response);
-						}
-					} else {
-						response= protocol.generateDirectoryCreateResponseMessage(pathName, "unsafe pathname given", false);
-						events.offer(response);
-
-					}
-
-					break;
-
-				case "DIRECTORY_CREATE_RESPONSE":
-					log.info("received from " + hostport +" "+ command);
-					break;
-
-				case "DIRECTORY_DELETE_RESPONSE":
-					log.info("received from " + hostport +" "+ command);
-					break;
-
-				case "FILE_CREATE_RESPONSE":
-					log.info("received from " + hostport +" "+ command);
-					break;
-
-				case "FILE_MODIFY_RESPONSE":
-					log.info("received from " + hostport +" "+ command);
-					break;
-
-				case "FILE_DELETE_RESPONSE":
-					log.info("received from " + hostport +" "+ command);
-					break;
-
-                case "CONNECTION_REFUSED":
-                    log.warning("connection refused");
-                    break;
-
-                case "INVALID_PROTOCOL":
-                    log.warning("invalid protocol");
-                    break;
-                
-                case "AUTH_REQUEST":
-                	System.out.println("recieved auth_request");
-                	String identity = inputMessageDoc.getString("identity");
-                	System.out.println("identity: "+identity);
-                	for (String keys: authorized_keys) {
-                		System.out.println("key: " + keys);
-                		if (keys.split(" ")[2].equals(identity)) {
-                			String clientPublicKey = keys.split(" ")[1];
-
-              
-                	        PublicKey pubkey = getPublicKey(clientPublicKey);
-                	        System.out.println("public key generate ");
-                	        System.out.println(pubkey);
-           
-                			
-              		
-                			//create key AES
-                			KeyGenerator gen = KeyGenerator.getInstance("AES");
+								//create key AES
+								KeyGenerator kg = KeyGenerator.getInstance("AES");
+								kg.init(128);
+								SecretKey sk = kg.generateKey();
+								byte[] b = sk.getEncoded();
+                			/*KeyGenerator gen = KeyGenerator.getInstance("AES");
                 			gen.init(128);
                 		    SecretKey AES = gen.generateKey();
-                		    
+
                 		    // get the raw key bytes
                 		    System.out.println("secret key: "+AES);
                 		    byte[] symmetriskNyckel = AES.getEncoded();
-                		    
-                		    //encrypt AES key with RSA
-                		    Cipher pipher = Cipher.getInstance("RSA");
+                		    secretKey = new String(symmetriskNyckel);*/
+								//secretKey = new String(b);
+								System.out.println(b);
+								System.out.println(new String(b));
+								secretKey = Base64.getEncoder().encodeToString(b);
+								response = protocol.generateAuthRespondSuccessMessage(secretKey);
+								events.offer(response);
+								//encrypt AES key with RSA
+                		    /*Cipher pipher = Cipher.getInstance("RSA");
                 		    pipher.init(Cipher.ENCRYPT_MODE, pubkey);
                 		    byte[] krypteradAESNyckel= pipher.doFinal(symmetriskNyckel);
                 		    System.out.println("get raw key byte: "+krypteradAESNyckel);
-                		    
+
                 		    String secretKeyEncoded = Base64.getEncoder().encodeToString(krypteradAESNyckel);
                 		    System.out.println("secret key encode with pubkey: "+ secretKeyEncoded);
-                		    
-                		}
-                	}
-                	break;
-                	
+                		    */
+							}
 
-				default:				
-					log.info("invalid command");
+						}
+						break;
 
+
+					default:
+						log.info("invalid command");
+				}
 			}
 
 		} catch (java.util.InputMismatchException e) {
@@ -551,24 +589,50 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 		log.info("Sending to " + hostport + " "+response);
 //    	return response;
 	}
-	
-	
-	
-	
-	
+
+
+
+
+
 	public static PublicKey getPublicKey(String key) throws InvalidKeySpecException, NoSuchAlgorithmException {
 		KeyFactory kf = KeyFactory.getInstance("RSA");
 
-        X509EncodedKeySpec keySpecX509 = new X509EncodedKeySpec(Base64.getDecoder().decode(key));
+		X509EncodedKeySpec keySpecX509 = new X509EncodedKeySpec(Base64.getDecoder().decode(key));
 
-        PublicKey pubKey = kf.generatePublic(keySpecX509);
-        
+		PublicKey pubKey = kf.generatePublic(keySpecX509);
+
 		return pubKey;
 
 
 	}
 
-		
+	public static String encrypt( String str, String key ) throws NoSuchAlgorithmException, NoSuchPaddingException /*throws Exception*/, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException{
+
+		//SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+		SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
+
+
+		// AES encrypt
+		Cipher cipher = Cipher.getInstance("AES");
+		cipher.init(Cipher.ENCRYPT_MODE,  publicKey1);
+		byte[] result = cipher.doFinal(str.getBytes());
+		String outStr = Base64.getEncoder().encodeToString(result);
+		return outStr;
+	}
+	public static String decrypt(String str, String key) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException {
+		//SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+		SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
+
+
+		//Base64 dncode
+		byte[] content = Base64.getDecoder().decode(str);
+		//AES decrypt
+		Cipher cipher = Cipher.getInstance("AES");
+		cipher.init(Cipher.DECRYPT_MODE,  publicKey1);
+		byte[] result = cipher.doFinal(content);
+		String outStr = new String(result);
+		return outStr;
+	}
 
 
 }

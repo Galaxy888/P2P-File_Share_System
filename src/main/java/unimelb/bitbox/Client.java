@@ -16,6 +16,7 @@ import java.net.UnknownHostException;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Base64;
 
 
@@ -28,6 +29,8 @@ public class Client {
         HostPort peerHostPort=null;
         String command=null;
         String identity=null;
+
+        String AES128=null;
 
 
         //Object that will store the parsed command line arguments
@@ -118,25 +121,36 @@ public class Client {
 
             String authResponse = ClientSendReceiveMessage(input, output, authRequest);
 
+
+//            System.out.println("authResponse : "+ authResponse);
+
             String authResponseProcessed = process(authResponse);
+            System.out.println("authResponseProcessed : "+ authResponseProcessed);
 
             if(!authResponseProcessed.equals("false")){
 
                 String secretKey = decryptToGetSecretKey(authResponseProcessed,privateKey);
+                System.out.println(secretKey);
 
                 String commandJson = processCmd(command,peerHostPort);
+                System.out.println("commandJson: "+ commandJson);
 
                 String commandJsonEncryptSecretKey = encryptMessageSecretKey(commandJson,secretKey);
 
+                String commandJsonEncryptSecretKeyJson = protocol.generatePayload(commandJsonEncryptSecretKey);
 
-                String responseEncryptSecretKey = ClientSendReceiveMessage(input, output, commandJsonEncryptSecretKey);
+                String responseEncryptSecretKey = ClientSendReceiveMessage(input, output, commandJsonEncryptSecretKeyJson);
 
-                String responseDecrypt = decryptMessageSecretKey(responseEncryptSecretKey, secretKey);
+                // payload
+
+                String responseProcessedWithoutPayload = process(responseEncryptSecretKey);
+
+                String responseDecrypt = decryptMessageSecretKey(responseProcessedWithoutPayload, secretKey);
+
 
                 String responseProcessed = process(responseDecrypt);
 
                 System.out.println(responseProcessed);
-
 
             }
 
@@ -194,7 +208,10 @@ public class Client {
 
     public static String encryptMessageSecretKey( String str, String key ) throws NoSuchAlgorithmException, NoSuchPaddingException /*throws Exception*/, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException{
 
-        SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+        //SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+        SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
+
+        System.out.println("String, key: "+str+"   "+key);
 
         // AES encrypt
         Cipher cipher = Cipher.getInstance("AES");
@@ -204,7 +221,8 @@ public class Client {
         return outStr;
     }
     public static String decryptMessageSecretKey(String str, String key) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException {
-        SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+        //SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
+        SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
 
         //Base64 dncode
         byte[] content = Base64.getDecoder().decode(str);
@@ -224,27 +242,59 @@ public class Client {
 
         try {
             Document inputMessageDoc = Document.parse(inputMessage);
-            String command = inputMessageDoc.getString("command");
+            if(inputMessageDoc.getString("payload")!=null){
+                return inputMessageDoc.getString("payload");
 
-            switch(command) {
-                case "AUTH_RESPONSE":
-                    status = inputMessageDoc.getBoolean("status");
+            }
+            else {
+                String command = inputMessageDoc.getString("command");
 
-                    if(status){
-                        AES128 = inputMessageDoc.getString("command");
-                        return AES128;
-                    }else
-                        return "false";
+                switch (command) {
+                    case "AUTH_RESPONSE":
+                        status = inputMessageDoc.getBoolean("status");
 
-                case "CONNECT_PEER_RESPONSE":
+                        if (status) {
+                            /*String abs = inputMessageDoc.getString("AES128");
+                            System.out.println(abs);
+                            byte[] AES = Base64.getDecoder().decode(abs);
+                            System.out.println(AES);
+                            AES128 = new String(AES);*/
+                            AES128 = inputMessageDoc.getString("AES128");
+                            return AES128;
+                        } else{
+                            return "false";
+                        }
 
-                    return inputMessageDoc.getString("message");
+                    case "LIST_PEERS_RESPONSE":
+//                        return inputMessageDoc.getString("command");
 
-                case "DISCONNECT_PEER_REQUEST":
+                        ArrayList<Document> peersList = (ArrayList<Document>) inputMessageDoc.get("peers");
 
-                    return inputMessageDoc.getString("message");
+                        if(peersList.size()!=0){
+                            for (Document peer : peersList) {
+                                HostPort hostport = new HostPort(peer);
+                                response += hostport + "\t";
+                            }
+                            return response;
+                        }else{
+                            return "No peer connected";
+                        }
 
 
+
+
+
+
+                    case "CONNECT_PEER_RESPONSE":
+
+                        return inputMessageDoc.getString("message");
+
+                    case "DISCONNECT_PEER_REQUEST":
+
+                        return inputMessageDoc.getString("message");
+
+
+                }
             }
 
 
@@ -253,9 +303,7 @@ public class Client {
             e.printStackTrace();
 //    		this.CloseConnection();
         }
-
             return response;
-
         }
 
 
