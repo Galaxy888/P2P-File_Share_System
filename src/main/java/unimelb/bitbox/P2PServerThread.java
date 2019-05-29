@@ -8,6 +8,7 @@ import unimelb.bitbox.util.FileSystemManager;
 import unimelb.bitbox.util.HostPort;
 
 import java.io.*;
+import java.math.BigInteger;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.security.InvalidKeyException;
@@ -16,6 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
+import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -161,14 +163,14 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 			if (payload != null)
 			{
 				System.out.println(secretKey);
-				String message1 = decrypt(payload,secretKey);
-				System.out.println(message1);
+				String message1 = AESdecrypt(payload,secretKey);
+				System.out.println("decrypt:"+message1);
 				Document inputmessage1 = Document.parse(message1);
 				String command = inputmessage1.getString("command");
 				switch(command) {
 					case "LIST_PEERS_REQUEST":
 						String Listpeerresponse = protocol.generateListPeersResponseMessage(P2PServer.connectedHostPorts);
-						String sendmessage = encrypt(Listpeerresponse, secretKey);
+						String sendmessage = AESencrypt(Listpeerresponse, secretKey);
 						Document messageJson = new Document();
 						messageJson.append("payload", sendmessage);
 						response = messageJson.toJson();
@@ -532,7 +534,7 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 						for (String keys: authorized_keys) {
 							System.out.println("key: " + keys);
 							if (keys.split(" ")[2].equals(identity)) {
-								String clientPublicKey = keys.split(" ")[1];
+
 
 
 								// PublicKey pubkey = getPublicKey(clientPublicKey);
@@ -542,23 +544,24 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 
 
 								//create key AES
-								KeyGenerator kg = KeyGenerator.getInstance("AES");
-								kg.init(128);
-								SecretKey sk = kg.generateKey();
-								byte[] b = sk.getEncoded();
-                			/*KeyGenerator gen = KeyGenerator.getInstance("AES");
-                			gen.init(128);
-                		    SecretKey AES = gen.generateKey();
-
-                		    // get the raw key bytes
-                		    System.out.println("secret key: "+AES);
-                		    byte[] symmetriskNyckel = AES.getEncoded();
-                		    secretKey = new String(symmetriskNyckel);*/
-								//secretKey = new String(b);
-								System.out.println(b);
-								System.out.println(new String(b));
-								secretKey = Base64.getEncoder().encodeToString(b);
-								response = protocol.generateAuthRespondSuccessMessage(secretKey);
+//                			KeyGenerator kg = KeyGenerator.getInstance("AES");
+//                		    kg.init(128);
+//                		    SecretKey sk = kg.generateKey();
+//                		    byte[] b = sk.getEncoded();
+//                			/*KeyGenerator gen = KeyGenerator.getInstance("AES");
+//                			gen.init(128);
+//                		    SecretKey AES = gen.generateKey();
+//
+//                		    // get the raw key bytes
+//                		    System.out.println("secret key: "+AES);
+//                		    byte[] symmetriskNyckel = AES.getEncoded();
+//                		    secretKey = new String(symmetriskNyckel);*/
+//                		    //secretKey = new String(b);
+//                		    System.out.println(b);
+//                		    System.out.println(Base64.getEncoder().encodeToString(b));
+								//secretKey = Base64.getEncoder().encodeToString(b);
+								secretKey = CreatAesSecretKey();
+								response = protocol.generateAuthRespondSuccessMessage(RSAencrypt(Base64.getDecoder().decode(secretKey),keys));
 								events.offer(response);
 								//encrypt AES key with RSA
                 		    /*Cipher pipher = Cipher.getInstance("RSA");
@@ -591,22 +594,20 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 	}
 
 
-
-
-
-	public static PublicKey getPublicKey(String key) throws InvalidKeySpecException, NoSuchAlgorithmException {
-		KeyFactory kf = KeyFactory.getInstance("RSA");
-
-		X509EncodedKeySpec keySpecX509 = new X509EncodedKeySpec(Base64.getDecoder().decode(key));
-
-		PublicKey pubKey = kf.generatePublic(keySpecX509);
-
-		return pubKey;
-
-
+	public static String CreatAesSecretKey () throws NoSuchAlgorithmException
+	{
+		KeyGenerator kg = KeyGenerator.getInstance("AES");
+		kg.init(128);
+		SecretKey sk = kg.generateKey();
+		byte[] b = sk.getEncoded();
+		return Base64.getEncoder().encodeToString(b);
 	}
 
-	public static String encrypt( String str, String key ) throws NoSuchAlgorithmException, NoSuchPaddingException /*throws Exception*/, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException{
+
+
+
+
+	public static String AESencrypt( String message, String key ) throws NoSuchAlgorithmException, NoSuchPaddingException /*throws Exception*/, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException{
 
 		//SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
 		SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
@@ -615,17 +616,17 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 		// AES encrypt
 		Cipher cipher = Cipher.getInstance("AES");
 		cipher.init(Cipher.ENCRYPT_MODE,  publicKey1);
-		byte[] result = cipher.doFinal(str.getBytes());
+		byte[] result = cipher.doFinal(message.getBytes());
 		String outStr = Base64.getEncoder().encodeToString(result);
 		return outStr;
 	}
-	public static String decrypt(String str, String key) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException {
+	public static String AESdecrypt(String message, String key) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException {
 		//SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
 		SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
 
 
 		//Base64 dncode
-		byte[] content = Base64.getDecoder().decode(str);
+		byte[] content = Base64.getDecoder().decode(message);
 		//AES decrypt
 		Cipher cipher = Cipher.getInstance("AES");
 		cipher.init(Cipher.DECRYPT_MODE,  publicKey1);
@@ -634,5 +635,36 @@ public class P2PServerThread extends Thread implements ProtocolInterface {
 		return outStr;
 	}
 
+	public static String RSAencrypt(byte[] message, String key) throws NoSuchAlgorithmException, InvalidKeySpecException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException
+	{
+		String publicKey = key.split(" ")[1];
+		//System.out.println(publicKey);
+		byte[] a = Base64.getDecoder().decode(publicKey);
+		int Exponentlength = getlength(a,11);
+		BigInteger Exponent = new BigInteger(subBytes(a,15,Exponentlength));
+		//System.out.println(Exponent);
+		int moduluslength = getlength(a, 15 + Exponentlength);
+		BigInteger modulus = new BigInteger (subBytes(a, 15 + Exponentlength +4, moduluslength));
+		//System.out.println(modulus);
+		RSAPublicKeySpec spec = new RSAPublicKeySpec(modulus, Exponent);
+		KeyFactory factory = KeyFactory.getInstance("RSA");
+		PublicKey pub = factory.generatePublic(spec);
+		Cipher cipher = Cipher.getInstance("RSA");
+		cipher.init(Cipher.ENCRYPT_MODE,  pub);
+		byte[] result = cipher.doFinal(message);
+		String outstr = Base64.getEncoder().encodeToString(result);
+		return outstr;
+	}
+	public static int getlength (byte[] src, int begin)
+	{
+		return src[begin + 3] & 0xFF | (src[begin + 2] & 0xFF) << 8 |  (src[begin + 1] & 0xFF) << 16 |  (src[begin] & 0xFF) << 24;
+	}
+
+	public static byte[] subBytes(byte[] src, int begin, int count) {
+		byte[] bs = new byte[count];
+		for (int i = begin; i < begin + count; i++)
+			bs[i - begin] = src[i];
+		return bs;
+	}
 
 }

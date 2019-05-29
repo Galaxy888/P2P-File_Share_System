@@ -94,6 +94,9 @@ public class Client {
         System.out.println(privateKey);
 //        System.out.println("private key PKCS8："+new BASE64Encoder().encodeBuffer(privateKey.getEncoded()));
 
+//        String al = privateKey.getAlgorithm();
+//        System.out.println("al: "+al);
+
         Cipher pipher = Cipher.getInstance("RSA");
 
         // re-initialise the cipher to be in decrypt mode
@@ -125,12 +128,12 @@ public class Client {
 //            System.out.println("authResponse : "+ authResponse);
 
             String authResponseProcessed = process(authResponse);
-            System.out.println("authResponseProcessed : "+ authResponseProcessed);
+            System.out.println("authResponseProcessed(AES128) : "+ authResponseProcessed);
 
             if(!authResponseProcessed.equals("false")){
 
                 String secretKey = decryptToGetSecretKey(authResponseProcessed,privateKey);
-                System.out.println(secretKey);
+                System.out.println("secret key: "+ secretKey);
 
                 String commandJson = processCmd(command,peerHostPort);
                 System.out.println("commandJson: "+ commandJson);
@@ -190,10 +193,18 @@ public class Client {
     }
 
 
+    public static String decryptToGetSecretKey(String message, PrivateKey privateKey) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
+        byte[] messageByte = Base64.getDecoder().decode(message);
 
-    public static String decryptToGetSecretKey(String message, PrivateKey privateKey){
+        Cipher cipher = Cipher.getInstance("RSA");
 
-        return message;
+        cipher.init(cipher.DECRYPT_MODE,privateKey);
+
+        byte[] result = cipher.doFinal(messageByte);
+
+        String output = Base64.getEncoder().encodeToString(result);
+
+        return output;
 
     }
 
@@ -220,6 +231,7 @@ public class Client {
         String outStr = Base64.getEncoder().encodeToString(result);
         return outStr;
     }
+
     public static String decryptMessageSecretKey(String str, String key) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException, UnsupportedEncodingException {
         //SecretKey publicKey1 = new SecretKeySpec(key.getBytes(), "AES");
         SecretKey publicKey1 = new SecretKeySpec(Base64.getDecoder().decode(key), "AES");
@@ -279,9 +291,6 @@ public class Client {
                         }else{
                             return "No peer connected";
                         }
-
-
-
 
 
 
