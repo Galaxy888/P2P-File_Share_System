@@ -32,44 +32,6 @@
       <version>2.33</version>
     </dependency>
 
-    <!-- https://mvnrepository.com/artifact/commons-codec/commons-codec -->
-    <dependency>
-      <groupId>commons-codec</groupId>
-      <artifactId>commons-codec</artifactId>
-      <version>1.9</version>
-    </dependency>
-
-    <!-- https://mvnrepository.com/artifact/com.google.guava/guava -->
-    <dependency>
-      <groupId>com.google.guava</groupId>
-      <artifactId>guava</artifactId>
-      <version>r05</version>
-    </dependency>
-
-
-    <dependency>
-      <groupId>com.diffplug.guava</groupId>
-      <artifactId>guava-io</artifactId>
-      <version>19.0.0</version>
-    </dependency>
-
-    <!-- https://mvnrepository.com/artifact/commons-io/commons-io -->
-    <dependency>
-      <groupId>commons-io</groupId>
-      <artifactId>commons-io</artifactId>
-      <version>2.6</version>
-    </dependency>
-
-    <!-- https://mvnrepository.com/artifact/org.jclouds.provider/aws-ec2 -->
-    <dependency>
-      <groupId>org.jclouds.provider</groupId>
-      <artifactId>aws-ec2</artifactId>
-      <version>1.6.0</version>
-    </dependency>
-
-
-
-
   </dependencies>
   
   <build>
